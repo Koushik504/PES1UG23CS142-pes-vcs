@@ -35,33 +35,45 @@ void cmd_init(void) {
 }
 
 // Usage: pes add <file>...
-void cmd_add(int argc, char *argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: pes add <file>...\n");
-        return;
+int cmd_add(const char *path) {
+    Index idx;
+
+    // load index (or initialize if not exists)
+    if (index_load(&idx) != 0) {
+        idx.count = 0;
     }
 
-    Index index;
-    if (index_load(&index) != 0) {
-        fprintf(stderr, "error: failed to load index\n");
-        return;
+    // add file
+    if (index_add(&idx, path) != 0) {
+        printf("error: failed to add file\n");
+        return -1;
     }
 
-    for (int i = 2; i < argc; i++) {
-        if (index_add(&index, argv[i]) != 0) {
-            fprintf(stderr, "error: failed to add '%s'\n", argv[i]);
-        }
+    // save index
+    if (index_save(&idx) != 0) {
+        printf("error: failed to save index\n");
+        return -1;
     }
+
+    return 0;
 }
 
+
+
 // Usage: pes status
-void cmd_status(void) {
-    Index index;
-    if (index_load(&index) != 0) {
-        fprintf(stderr, "error: failed to load index\n");
-        return;
+int cmd_status() {
+    Index idx;          // ✅ correct
+    idx.count = 0;      // ✅ initialize
+
+    index_load(&idx);
+
+    printf("Staged files:\n");
+
+    for (int i = 0; i < idx.count; i++) {
+        printf("%s\n", idx.entries[i].path);
     }
-    index_status(&index);
+
+    return 0;
 }
 
 // Usage: pes commit -m <message>
@@ -118,7 +130,13 @@ int main(int argc, char *argv[]) {
     const char *cmd = argv[1];
 
     if      (strcmp(cmd, "init") == 0)     cmd_init();
-    else if (strcmp(cmd, "add") == 0)      cmd_add(argc, argv);
+    else if (strcmp(cmd, "add") == 0) {
+    if (argc < 3) {
+        printf("usage: pes add <file>\n");
+        return -1;
+    }
+    return cmd_add(argv[2]);
+}
     else if (strcmp(cmd, "status") == 0)   cmd_status();
     else if (strcmp(cmd, "commit") == 0)   cmd_commit(argc, argv);
     else if (strcmp(cmd, "log") == 0)      cmd_log();
