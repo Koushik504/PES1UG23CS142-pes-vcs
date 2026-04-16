@@ -92,18 +92,56 @@ int object_exists(const ObjectID *id) {
 //
 
 //
-// Returns 0 on success, -1 on error.
-int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // TODO: Implement
-    (void)type; (void)data; (void)len; (void)id_out;
-    return -1;
-}
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out)
+{
+    // 1. build header string based on type
+    const char *type_str;
+    if (type == OBJ_BLOB) type_str = "blob";
+    else if (type == OBJ_TREE) type_str = "tree";
+    else type_str = "commit";
 
-// Read an object from the store.
-//
-// Steps:
-//   1. Build the file path from the hash using object_path()
-//   2. Open and read the entire file
+    char header[64];
+    int header_len = sprintf(header, "%s %zu", type_str, len) + 1;
+
+    // 2. combine header + data
+    size_t total_size = header_len + len;
+    char *buffer = malloc(total_size);
+
+    memcpy(buffer, header, header_len);
+    memcpy(buffer + header_len, data, len);
+
+    // 3. compute hash using SAME buffer (IMPORTANT)
+    compute_hash(buffer, total_size, id_out);
+
+    char hex[65];
+    hash_to_hex(id_out, hex);
+
+    // 4. create directories
+    mkdir(".pes", 0755);
+    mkdir(".pes/objects", 0755);
+
+    char dir[256];
+    sprintf(dir, ".pes/objects/%.2s", hex);
+    mkdir(dir, 0755);
+
+    // 5. path
+    char path[256];
+    sprintf(path, "%s/%s", dir, hex + 2);
+
+    // 6. write FULL buffer
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        free(buffer);
+        return -1;
+    }
+
+    fwrite(buffer, 1, total_size, f);
+    fclose(f);
+
+    free(buffer);
+    return 0;
+}
+    // 4. creat
 //   3. Parse the header to extract the type string and size
 //   4. Verify integrity: recompute the SHA-256 of the file contents
 //      and compare to the expected hash (from *id). Return -1 if mismatch.
@@ -121,8 +159,52 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 //
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
-int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out)
+{
+    char hex[65];
+    hash_to_hex(id, hex);
+
+    char path[256];
+    sprintf(path, ".pes/objects/%.2s/%s", hex, hex + 2);
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    // get file size
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    rewind(f);
+
+    char *buffer = malloc(size);
+    fread(buffer, 1, size, f);
+    fclose(f);
+
+    // find header end
+    char *null_pos = memchr(buffer, '\0', size);
+    if (!null_pos) return -1;
+
+    // parse header
+    char type_str[10];
+    sscanf(buffer, "%s %zu", type_str, len_out);
+
+    if (strcmp(type_str, "blob") == 0) *type_out = OBJ_BLOB;
+    else if (strcmp(type_str, "tree") == 0) *type_out = OBJ_TREE;
+    else *type_out = OBJ_COMMIT;
+
+    size_t header_len = (null_pos - buffer) + 1;
+
+    *data_out = malloc(*len_out);
+    memcpy(*data_out, buffer + header_len, *len_out);
+
+// recompute hash of stored object
+ObjectID new_id;
+compute_hash(buffer, size, &new_id);
+
+// compare with original id
+if (memcmp(new_id.hash, id->hash, 32) != 0) {
+    free(buffer);
+    return -1; // integrity check failed
+}
+    free(buffer);
+    return 0;
 }
